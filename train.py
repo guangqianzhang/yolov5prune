@@ -44,7 +44,7 @@ from utils.general import (LOGGER, check_dataset, check_file, check_git_status, 
                            intersect_dicts, labels_to_class_weights, labels_to_image_weights, methods, one_cycle,
                            print_args, print_mutation, strip_optimizer)
 from utils.loggers import Loggers
-from utils.loggers.wandb.wandb_utils import check_wandb_resume
+# from utils.loggers.wandb.wandb_utils import check_wandb_resume
 from utils.loss import ComputeLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
@@ -63,7 +63,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     save_dir, epochs, batch_size, weights, single_cls, evolve, data, cfg, resume, noval, nosave, workers, freeze = \
         Path(opt.save_dir), opt.epochs, opt.batch_size, opt.weights, opt.single_cls, opt.evolve, opt.data, opt.cfg, \
         opt.resume, opt.noval, opt.nosave, opt.workers, opt.freeze
-
+    callbacks.run('on_pretrain_routine_start')
     # Directories
     w = save_dir / 'weights'  # weights dir
     (w.parent if evolve else w).mkdir(parents=True, exist_ok=True)  # make dir
@@ -100,7 +100,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     cuda = device.type != 'cpu'
     init_seeds(1 + RANK)
     with torch_distributed_zero_first(LOCAL_RANK):
-        data_dict = data_dict or check_dataset(data)  # check if None
+        data_dict = data_dict or check_dataset(data)  # check if None 等于非空
     train_path, val_path = data_dict['train'], data_dict['val']
     nc = 1 if single_cls else int(data_dict['nc'])  # number of classes
     names = ['item'] if single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
@@ -117,15 +117,16 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         model = Model(cfg or ckpt['model'].yaml, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
         exclude = ['anchor'] if (cfg or hyp.get('anchors')) and not resume else []  # exclude keys
         csd = ckpt['model'].float().state_dict()  # checkpoint state_dict as FP32
-        csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
+        csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect交集操作
         model.load_state_dict(csd, strict=False)  # load
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
     else:
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+    # amp = check_amp(model)  # check AMP
 
     # Freeze
-    freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
-    for k, v in model.named_parameters():
+    freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze list
+    for k, v in model.named_parameters():  # 返回模型参数
         v.requires_grad = True  # train all layers
         if any(x in k for x in freeze):
             LOGGER.info(f'freezing {k}')
@@ -141,14 +142,14 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         loggers.on_params_update({"batch_size": batch_size})
 
     # Optimizer
-    nbs = 64  # nominal batch size
+    nbs = 64  # nominal batch size 调整weight_decay
     accumulate = max(round(nbs / batch_size), 1)  # accumulate loss before optimizing
     hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
     LOGGER.info(f"Scaled weight_decay = {hyp['weight_decay']}")
 
     g0, g1, g2 = [], [], []  # optimizer parameter groups
     for v in model.modules():
-        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):  # bias
+        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):  # bias 是否为可学习
             g2.append(v.bias)
         if isinstance(v, nn.BatchNorm2d):  # weight (no decay)
             g0.append(v.weight)
@@ -173,7 +174,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  # plot_lr_scheduler(optimizer, scheduler, epochs)
 
-    # EMA
+    # EMA  指数移动平均
     ema = ModelEMA(model) if RANK in [-1, 0] else None
 
     # Resume
@@ -211,19 +212,40 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
-    train_loader, dataset = create_dataloader(train_path, imgsz, batch_size // WORLD_SIZE, gs, single_cls,
-                                              hyp=hyp, augment=True, cache=opt.cache, rect=opt.rect, rank=LOCAL_RANK,
-                                              workers=workers, image_weights=opt.image_weights, quad=opt.quad,
-                                              prefix=colorstr('train: '), shuffle=True)
-    mlc = int(np.concatenate(dataset.labels, 0)[:, 0].max())  # max label class
-    nb = len(train_loader)  # number of batches
+    train_loader, dataset = create_dataloader(train_path,
+                                              imgsz,
+                                              batch_size // WORLD_SIZE,
+                                              gs,
+                                              single_cls,
+                                              hyp=hyp,
+                                              augment=True,
+                                              cache=None if opt.cache == 'val' else opt.cache,
+                                              rect=opt.rect,
+                                              rank=LOCAL_RANK,
+                                              workers=workers,
+                                              image_weights=opt.image_weights,
+                                              quad=opt.quad,
+                                              prefix=colorstr('train: '),
+                                              shuffle=True,
+                                              # seed=opt.seed
+                                              )
+    labels = np.concatenate(dataset.labels, 0)
+    mlc = int(labels[:, 0].max())  # max label class
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
     # Process 0
-    if RANK in [-1, 0]:
-        val_loader = create_dataloader(val_path, imgsz, batch_size // WORLD_SIZE * 2, gs, single_cls,
-                                       hyp=hyp, cache=None if noval else opt.cache, rect=True, rank=-1,
-                                       workers=workers, pad=0.5,
+    if RANK in {-1, 0}:
+        val_loader = create_dataloader(val_path,
+                                       imgsz,
+                                       batch_size // WORLD_SIZE * 2,
+                                       gs,
+                                       single_cls,
+                                       hyp=hyp,
+                                       cache=None if noval else opt.cache,
+                                       rect=True,
+                                       rank=-1,
+                                       workers=workers * 2,
+                                       pad=0.5,
                                        prefix=colorstr('val: '))[0]
 
         if not resume:
@@ -236,7 +258,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
             # Anchors
             if not opt.noautoanchor:
-                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)
+                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)  # run AutoAnchor
             model.half().float()  # pre-reduce anchor precision
 
         callbacks.run('on_pretrain_routine_end')
@@ -258,20 +280,24 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
     # Start training
     t0 = time.time()
-    nw = max(round(hyp['warmup_epochs'] * nb), 1000)  # number of warmup iterations, max(3 epochs, 1k iterations)
+    nb = len(train_loader)  # number of batches
+    nw = max(round(hyp['warmup_epochs'] * nb), 100)  # number of warmup iterations, max(3 epochs, 100 iterations)
     # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
     last_opt_step = -1
     maps = np.zeros(nc)  # mAP per class
     results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = amp.GradScaler(enabled=cuda)
-    stopper = EarlyStopping(patience=opt.patience)
+    # scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    scaler = amp.GradScaler(enabled=cuda)  # 启用梯度缩放
+    stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
+    # callbacks.run('on_train_start')
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
                 f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs} epochs...')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
+        # callbacks.run('on_train_epoch_start')
         model.train()
 
         # Update image weights (optional, single-GPU only)
@@ -293,6 +319,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+            # callbacks.run('on_train_batch_start')
             ni = i + nb * epoch  # number integrated batches (since train start)
             imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
 
@@ -307,15 +334,16 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     if 'momentum' in x:
                         x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])
 
-            # Multi-scale
+            # Multi-scale  多尺度训练
             if opt.multi_scale:
-                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs  # size
+                sz = random.randrange(int(imgsz * 0.5), int(imgsz * 1.5) + gs) // gs * gs  # size
                 sf = sz / max(imgs.shape[2:])  # scale factor
                 if sf != 1:
                     ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  # new shape (stretched to gs-multiple)
                     imgs = nn.functional.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)
 
             # Forward
+            # with torch.cuda.amp.autocast(amp):
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
                 loss, loss_items = compute_loss(pred, targets.to(device))  # loss scaled by batch_size
@@ -329,6 +357,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
             # Optimize
             if ni - last_opt_step >= accumulate:
+                # scaler.unscale_(optimizer)  # unscale gradients
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # clip gradients
                 scaler.step(optimizer)  # optimizer.step
                 scaler.update()
                 optimizer.zero_grad()
@@ -349,7 +379,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         lr = [x['lr'] for x in optimizer.param_groups]  # for loggers
         scheduler.step()
 
-        if RANK in [-1, 0]:
+        if RANK in {-1, 0}:
             # mAP
             callbacks.run('on_train_epoch_end', epoch=epoch)
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
@@ -358,6 +388,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 results, maps, _ = val.run(data_dict,
                                            batch_size=batch_size // WORLD_SIZE * 2,
                                            imgsz=imgsz,
+                                           # half=amp,
                                            model=ema.ema,
                                            single_cls=single_cls,
                                            dataloader=val_loader,
@@ -368,10 +399,11 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
             # Update best mAP
             fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]
+            stop = stopper(epoch=epoch, fitness=fi)  # early stop check
             if fi > best_fitness:
                 best_fitness = fi
             log_vals = list(mloss) + list(results) + lr
-            callbacks.run('on_fit_epoch_end', log_vals, epoch, best_fitness, fi)
+            callbacks.run('on_fit_epoch_end', log_vals,None ,epoch, best_fitness, fi)
 
             # Save model
             if (not nosave) or (final_epoch and not evolve):  # if save
@@ -409,26 +441,27 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training -----------------------------------------------------------------------------------------------------
-    if RANK in [-1, 0]:
+    if RANK in {-1, 0}:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
         for f in last, best:
             if f.exists():
                 strip_optimizer(f)  # strip optimizers
                 if f is best:
                     LOGGER.info(f'\nValidating {f}...')
-                    results, _, _ = val.run(data_dict,
-                                            batch_size=batch_size // WORLD_SIZE * 2,
-                                            imgsz=imgsz,
-                                            model=attempt_load(f, device).half(),
-                                            iou_thres=0.65 if is_coco else 0.60,  # best pycocotools results at 0.65
-                                            single_cls=single_cls,
-                                            dataloader=val_loader,
-                                            save_dir=save_dir,
-                                            save_json=is_coco,
-                                            verbose=True,
-                                            plots=True,
-                                            callbacks=callbacks,
-                                            compute_loss=compute_loss)  # val best model with plots
+                    results, _, _ = val.run(
+                        data_dict,
+                        batch_size=batch_size // WORLD_SIZE * 2,
+                        imgsz=imgsz,
+                        model=attempt_load(f, device).half(),
+                        iou_thres=0.65 if is_coco else 0.60,  # best pycocotools results at 0.65
+                        single_cls=single_cls,
+                        dataloader=val_loader,
+                        save_dir=save_dir,
+                        save_json=is_coco,
+                        verbose=True,
+                        plots=True,
+                        callbacks=callbacks,
+                        compute_loss=compute_loss)  # val best model with plots
                     if is_coco:
                         callbacks.run('on_fit_epoch_end', list(mloss) + list(results) + lr, epoch, best_fitness, fi)
 
@@ -441,13 +474,13 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default=ROOT / 'yolov5n.pt', help='initial weights path')
-    parser.add_argument('--cfg', type=str, default='', help='model.yaml path')
-    parser.add_argument('--data', type=str, default=ROOT / 'data/voc.yaml', help='dataset.yaml path')
+    parser.add_argument('--weights', type=str, default=ROOT / 'weights/yolov5n6.pt', help='initial weights path')
+    parser.add_argument('--cfg', type=str, default='models/yolov5n.yaml', help='model.yaml path')
+    parser.add_argument('--data', type=str, default=ROOT / 'data/CDC.yaml', help='dataset.yaml path')
     parser.add_argument('--hyp', type=str, default=ROOT / 'data/hyps/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch-size', type=int, default=64, help='total batch size for all GPUs, -1 for autobatch')
-    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=512, help='train, val image size (pixels)')
+    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=1280, help='train, val image size (pixels)')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
@@ -492,7 +525,7 @@ def main(opt, callbacks=Callbacks()):
       #  check_requirements(exclude=['thop'])
 
     # Resume
-    if opt.resume and not check_wandb_resume(opt) and not opt.evolve:  # resume an interrupted run
+    if opt.resume and not opt.evolve:  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml', errors='ignore') as f:

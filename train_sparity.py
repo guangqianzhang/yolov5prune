@@ -44,7 +44,7 @@ from utils.general import (LOGGER, check_dataset, check_file, check_git_status, 
                            intersect_dicts, labels_to_class_weights, labels_to_image_weights, methods, one_cycle,
                            print_args, print_mutation, strip_optimizer)
 from utils.loggers import Loggers
-from utils.loggers.wandb.wandb_utils import check_wandb_resume
+# from utils.loggers.wandb.wandb_utils import check_wandb_resume
 from utils.loss import ComputeLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
@@ -529,7 +529,7 @@ def parse_opt(known=False):
 
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
     return opt
-110.4
+
 
 def main(opt, callbacks=Callbacks()):
     # Checks
@@ -539,7 +539,7 @@ def main(opt, callbacks=Callbacks()):
       #  check_requirements(exclude=['thop'])
 
     # Resume
-    if opt.resume and not check_wandb_resume(opt) and not opt.evolve:  # resume an interrupted run
+    if opt.resume  and not opt.evolve:  # resume an interrupted run
         ckpt = opt.resume if isinstance(opt.resume, str) else get_latest_run()  # specified or most recent path
         assert os.path.isfile(ckpt), 'ERROR: --resume checkpoint does not exist'
         with open(Path(ckpt).parent.parent / 'opt.yaml', errors='ignore') as f:

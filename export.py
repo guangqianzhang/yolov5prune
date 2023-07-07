@@ -333,7 +333,7 @@ def export_engine(model, im, file, train, half, simplify, workspace=4, verbose=F
 @torch.no_grad()
 def run(data=ROOT / 'data/coco128.yaml',  # 'dataset.yaml path'
         weights=ROOT / 'yolov5s.pt',  # weights path
-        imgsz=(640, 640),  # image (height, width)
+        imgsz=(1280, 1280),  # image (height, width)
         batch_size=1,  # batch size
         device='cpu',  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         include=('torchscript', 'onnx'),  # include formats
@@ -425,9 +425,9 @@ def run(data=ROOT / 'data/coco128.yaml',  # 'dataset.yaml path'
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
-    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model.pt path(s)')
-    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640, 640], help='image (h, w)')
+    parser.add_argument('--data', type=str, default=ROOT / 'data/CDC.yaml', help='dataset.yaml path')
+    parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'runs/train/exp36/weights/best.pt', help='model.pt path(s)')
+    parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[1600, 1200], help='image (h, w)')
     parser.add_argument('--batch-size', type=int, default=1, help='batch size')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--half', action='store_true', help='FP16 half-precision export')
@@ -447,7 +447,7 @@ def parse_opt():
     parser.add_argument('--iou-thres', type=float, default=0.45, help='TF.js NMS: IoU threshold')
     parser.add_argument('--conf-thres', type=float, default=0.25, help='TF.js NMS: confidence threshold')
     parser.add_argument('--include', nargs='+',
-                        default=['torchscript', 'onnx'],
+                        default=['engine', 'onnx'],
                         help='available formats are (torchscript, onnx, engine, coreml, saved_model, pb, tflite, tfjs)')
     opt = parser.parse_args()
     print_args(FILE.stem, opt)

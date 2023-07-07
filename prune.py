@@ -148,7 +148,7 @@ def run(data,
     is_coco = isinstance(data.get('val'), str) and data['val'].endswith('coco/val2017.txt')  # COCO dataset
     nc = 1 if single_cls else int(data['nc'])  # number of classes
     iouv = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
-    niou = iouv.numel()
+    niou = iouv.numel() # number
 
     # Dataloader
     if not training:
@@ -307,7 +307,7 @@ def run(data,
 @torch.no_grad()
 def run_prune(data,
         weights=None,  # model.pt path(s)
-        cfg = 'models/yolov5l.yaml',
+        cfg = 'models/yolov5sbox.yaml',
         percent=0,
         batch_size=32,  # batch size
         imgsz=640,  # inference size (pixels)
@@ -345,7 +345,7 @@ def run_prune(data,
     else:  # called directly
         device = select_device(device, batch_size=batch_size)
 
-        # Directories
+        # Directories目录
         save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
         (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
@@ -376,29 +376,29 @@ def run_prune(data,
     model_list = {}
     ignore_bn_list = []
 
-    for i, layer in model.named_modules():
+    for i, layer in model.named_modules():  # 遍历模型层
         # if isinstance(layer, nn.Conv2d):
         #     print("@Conv :",i,layer)
-        if isinstance(layer, Bottleneck):
-            if layer.add:
-                ignore_bn_list.append(i.rsplit(".",2)[0]+".cv1.bn")
+        if isinstance(layer, Bottleneck):  # 属于主干
+            if layer.add:  # add 属性层 忽略
+                ignore_bn_list.append(i.rsplit(".",2)[0]+".cv1.bn")  # 为什么这样命名 21
                 ignore_bn_list.append(i + '.cv1.bn')
                 ignore_bn_list.append(i + '.cv2.bn')
-        if isinstance(layer, torch.nn.BatchNorm2d):
+        if isinstance(layer, torch.nn.BatchNorm2d):  # BN层
             if i not in ignore_bn_list:
-                model_list[i] = layer
-                # print(i, layer)
+                model_list[i] = layer  # 不属于add层  45
+                print(i, layer)
             # bnw = layer.state_dict()['weight']
     model_list = {k:v for k,v in model_list.items() if k not in ignore_bn_list}
   #  print("prune module :",model_list.keys())
-    prune_conv_list = [layer.replace("bn", "conv") for layer in model_list.keys()]
+    prune_conv_list = [layer.replace("bn", "conv") for layer in model_list.keys()] #
     # print(prune_conv_list)
     bn_weights = gather_bn_weights(model_list)
-    sorted_bn = torch.sort(bn_weights)[0]
+    sorted_bn = torch.sort(bn_weights)[0]  # 提取张量部分
     # print("model_list:",model_list)
     # print("bn_weights:",bn_weights)
     # 避免剪掉所有channel的最高阈值(每个BN层的gamma的最大值的最小值即为阈值上限)
-    highest_thre = []
+    highest_thre = []  # 42
     for bnlayer in model_list.values():
         highest_thre.append(bnlayer.weight.data.abs().max().item())
     # print("highest_thre:",highest_thre)
@@ -469,7 +469,7 @@ def run_prune(data,
     for bnname, bnlayer in model.named_modules():
         if isinstance(bnlayer, nn.BatchNorm2d):
             bn_module = bnlayer
-            mask = obtain_bn_mask(bn_module, thre)
+            mask = obtain_bn_mask(bn_module, thre)  ###
             if bnname in ignore_bn_list:
                 mask = torch.ones(bnlayer.weight.data.size()).cuda()
             maskbndict[bnname] = mask
@@ -493,12 +493,14 @@ def run_prune(data,
 
     from_to_map = pruned_model.from_to_map
     pruned_model_state = pruned_model.state_dict()
-    # print("="*100)
+    print("="*100)
     # for i, k in enumerate(pruned_model_state.keys()):
     #     print("the ", i, " : ", k, pruned_model_state[k].shape)
     # print("="*100)
     # for i, k in enumerate(modelstate.keys()):
     #     print("the ", i, " : ", k, modelstate[k].shape)
+    # print(pruned_model_state.keys() -modelstate.keys())
+    # print(modelstate.keys() -pruned_model_state.keys())
     assert pruned_model_state.keys() == modelstate.keys()
     # ======================================================================================= #
     changed_state = []
@@ -736,7 +738,7 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default=ROOT / 'data/voc.yaml', help='dataset.yaml path')
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'runs/train/exp47/weights/last.pt', help='model.pt path(s)')
-    parser.add_argument('--cfg', type=str, default='models/yolov5l.yaml', help='model.yaml path')
+    # parser.add_argument('--cfg', type=str, default='models/yolov5sbox.yaml ', help='model.yaml path')
     parser.add_argument('--percent', type=float, default=0.4, help='prune percentage')
     parser.add_argument('--batch-size', type=int, default=32, help='batch size')
     parser.add_argument('--imgsz', '--img', '--img-size', type=int, default=512, help='inference size (pixels)')

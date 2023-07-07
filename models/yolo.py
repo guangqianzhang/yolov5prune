@@ -241,7 +241,7 @@ class Model(nn.Module):
         return self
 
 class ModelPruned(nn.Module):
-    def __init__(self, maskbndict, cfg='yolov5s.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
+    def __init__(self, maskbndict, cfg='yolov5sbox.yaml', ch=3, nc=None, anchors=None):  # model, input channels, number of classes
         super().__init__()
         self.maskbndict = maskbndict
         if isinstance(cfg, dict):
@@ -471,7 +471,9 @@ def parse_pruned_model(maskbndict, d, ch):  # model_dict, input_channels(3)
 
         n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
         named_m_base = "model.{}".format(i)
-        if m in [Conv]:
+        if m in [Conv,Focus]:
+            if m==Focus:
+                named_m_base = named_m_base + '.conv'
             named_m_bn = named_m_base + ".bn"
 
             bnc = int(maskbndict[named_m_bn].sum())

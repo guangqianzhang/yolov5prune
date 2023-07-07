@@ -67,3 +67,18 @@ class SPPFPruned(nn.Module):
             y1 = self.m(x)
             y2 = self.m(y1)
             return self.cv2(torch.cat([x, y1, y2, self.m(y2)], 1))
+
+class SPPPruned(nn.Module):
+    # Spatial Pyramid Pooling (SPP) layer https://arxiv.org/abs/1406.4729
+    def __init__(self,  cv1in, cv1out, cv2out,  k=(5, 9, 13)):
+        super().__init__()
+        # c_ = c1 // 2  # hidden channels
+        self.cv1 = Conv(cv1in, cv1out, 1, 1)
+        self.cv2 = Conv(cv1out * (len(k) + 1), cv2out, 1, 1)
+        self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
+
+    def forward(self, x):
+        x = self.cv1(x)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')  # suppress torch 1.9.0 max_pool2d() warning
+            return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))

@@ -46,7 +46,7 @@ class Loggers():
         self.keys = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss
                      'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',  # metrics
                      'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss
-                     'x/lr0', 'x/lr1', 'x/lr2','sr']  # params
+                     'x/lr0', 'x/lr1', 'x/lr2']  # params ,'sr'
         for k in LOGGERS:
             setattr(self, k, None)  # init empty logger dictionary
         self.csv = True  # always log to csv
@@ -123,7 +123,7 @@ class Loggers():
         if self.tb:
             for k, v in x.items():                    
                 self.tb.add_scalar(k, v, epoch)
-            self.tb.add_histogram('bn_weights/hist', bn_weights, epoch, bins='doane')
+            # self.tb.add_histogram('bn_weights/hist', bn_weights, epoch, bins='doane')
 
         if self.wandb:
             self.wandb.log(x)
